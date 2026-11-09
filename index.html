@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Stair model – left-turning U-stair</title>
+<meta name="description" content="Interactive 3D model of a left-turning U-stair with a wall-side handrail, generated from measured plan lengths.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #efe9e0;
+    --panel: #fbf8f3;
+    --ink: #1f2a37;
+    --muted: #6b7280;
+    --line: #d9d1c4;
+    --accent: #174a7a;
+    --rail: #d87a1e;
+    --ok: #2f7a4a;
+    --warn: #b4541d;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #15181d; --panel: #1f242b; --ink: #ece7df; --muted: #9aa3ad; --line: #333a44;
+      --accent: #8ab8e6; --rail: #f0923a; --ok: #6cc08a; --warn: #f29a5c;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #15181d; --panel: #1f242b; --ink: #ece7df; --muted: #9aa3ad; --line: #333a44;
+    --accent: #8ab8e6; --rail: #f0923a; --ok: #6cc08a; --warn: #f29a5c;
+  }
+
+  html { height: 100%; scroll-padding-top: env(safe-area-inset-top, 0px); }
+  *, *::before, *::after { box-sizing: inherit; }
+  body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.4 Manrope, system-ui, sans-serif;
+  }
+
+  /* 3D viewport. Explicit width/height: a canvas is a replaced element and
+     does not stretch with inset:0 on its own. */
+  #viewport {
+    position: fixed; inset: 0; width: 100%; height: 100%; display: block;
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  }
+
+  header {
+    position: fixed; left: 0; right: 0; top: 0;
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 8px;
+    background: linear-gradient(var(--bg), transparent);
+    pointer-events: none;
+  }
+  h1 { margin: 0; font: 600 22px/1.1 Fraunces, Georgia, serif; letter-spacing: -0.01em; }
+  h1 small { display: block; margin-top: 3px; font: 500 12px/1.4 Manrope, sans-serif; color: var(--muted); }
+
+  #hint {
+    position: fixed; left: 16px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 74px);
+    font-size: 12px; color: var(--muted); pointer-events: none; transition: opacity .4s;
+  }
+
+  /* Bottom sheet with results and sliders */
+  #sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; max-height: 78%; overflow: auto;
+    padding: 0 16px calc(env(safe-area-inset-bottom, 0px) + 14px);
+    background: var(--panel); border-top: 1px solid var(--line); border-radius: 18px 18px 0 0;
+    box-shadow: 0 -8px 30px rgba(0, 0, 0, .08);
+    transform: translateY(calc(100% - 58px)); transition: transform .3s ease;
+  }
+  #sheet.open { transform: translateY(0); }
+  #sheet-toggle {
+    position: sticky; top: 0; height: 58px; width: 100%;
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--panel); border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer;
+  }
+  #sheet-toggle b { font-weight: 600; }
+  #sheet-toggle span { color: var(--muted); font-size: 13px; }
+
+  #results {
+    margin: 10px 0 6px; padding: 12px 14px;
+    border: 1px solid var(--line); border-radius: 12px;
+    background: color-mix(in srgb, var(--panel) 80%, var(--bg));
+  }
+  #results h2 { margin: 0 0 8px; font: 600 15px/1.2 Fraunces, Georgia, serif; }
+  #results p { margin: 8px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { padding: 3px 0; text-align: right; font-weight: 500; }
+  th { color: var(--muted); font-weight: 400; font-size: 12px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; color: var(--muted); font-weight: 400; }
+  .model { font-weight: 600; }
+  .ok { color: var(--ok); }
+  .warn { color: var(--warn); }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 2px; }
+  .actions button {
+    font: 600 13px Manrope, sans-serif; color: var(--ink); background: transparent;
+    border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; cursor: pointer;
+  }
+
+  .control {
+    display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center;
+    padding: 7px 0; border-top: 1px solid var(--line);
+  }
+  .control label { font-weight: 500; }
+  .control output { min-width: 4.5em; text-align: right; color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .control input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: var(--rail); }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { #sheet, #hint { transition: none; } }
+</style>
+</head>
+<body>
+
+<canvas id="viewport" aria-label="3D model of the stair"></canvas>
+
+<header>
+  <h1>Stair model<small>Left-turning U-stair with a wall-side handrail</small></h1>
+</header>
+<div id="hint">Drag to turn · pinch or scroll to zoom</div>
+
+<section id="sheet" aria-label="Measurements and handrail check">
+  <button id="sheet-toggle" aria-expanded="false">
+    <b>Measurements &amp; handrail check</b><span id="sheet-toggle-label">Open</span>
+  </button>
+
+  <div id="results">
+    <h2>Handrail along the wall</h2>
+    <table>
+      <thead>
+        <tr><th>Section</th><th>Plan length</th><th>Model</th><th>Measured</th></tr>
+      </thead>
+      <tbody id="results-body"></tbody>
+    </table>
+    <p id="results-note"></p>
+  </div>
+
+  <div class="actions">
+    <button id="fit-view">Fit to screen</button>
+    <button id="view-above">View from above</button>
+    <button id="view-hall">View from the hall</button>
+    <button id="reset-values">Reset values</button>
+  </div>
+
+  <div id="controls"></div>
+</section>
+
+<!-- three.js r128. For a fully offline page, download this file next to index.html and change the src to "three.min.js". -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+'use strict';
+
+/* ---------------------------------------------------------------------------
+ * Parameters
+ *
+ * Plan lengths follow the common Swedish measuring convention for curved
+ * stairs: for each wall section, "1" is the flat plan length along the wall
+ * and "2" is the sloping length along the stringer. The U-stair has three
+ * wall sections: A (bottom end wall), B (long wall), C (top end wall).
+ * All lengths are in metres.
+ * ------------------------------------------------------------------------- */
+
+const PARAMETERS = {
+  stairWidth:        { value: 0.90,  min: 0.70, max: 1.20, step: 0.01,  label: 'Stair width (m)' },
+  floorToFloor:      { value: 3.165, min: 2.40, max: 3.60, step: 0.005, label: 'Floor to floor (m)' },
+  riserCount:        { value: 17,    min: 12,   max: 22,   step: 1,     label: 'Number of risers' },
+  bottomWinders:     { value: 4,     min: 2,    max: 6,    step: 1,     label: 'Winder treads, bottom turn' },
+  topWinders:        { value: 4,     min: 2,    max: 6,    step: 1,     label: 'Winder treads, top turn' },
+  planA:             { value: 0.55,  min: 0.20, max: 1.20, step: 0.005, label: 'A1 – bottom end wall, start to corner (m)' },
+  planB:             { value: 4.17,  min: 3.00, max: 5.50, step: 0.005, label: 'B1 – long wall, corner to corner (m)' },
+  planC:             { value: 0.76,  min: 0.20, max: 1.20, step: 0.005, label: 'C1 – top end wall, corner to end (m)' },
+  handrailHeight:    { value: 0.90,  min: 0.80, max: 1.10, step: 0.01,  label: 'Handrail height above nosing (m)' },
+};
+
+/** Sloping lengths measured on site, used for comparison in the results table. */
+const MEASURED_SLOPING = { A: 0.615, B: 4.925, C: 0.83 };
+
+const MIN_STRAIGHT_TREADS = 3;
+const HANDRAIL_WALL_OFFSET = 0.06;
+const HANDRAIL_RADIUS = 0.024;
+const LANDING_THICKNESS = 0.25;
+const LANDING_DEPTH = 1.0;
+const WALL_THICKNESS = 0.12;
+
+const params = Object.fromEntries(Object.entries(PARAMETERS).map(([key, def]) => [key, def.value]));
+
+/* ---------------------------------------------------------------------------
+ * Stair layout (pure geometry, no rendering)
+ *
+ * Plan coordinate system (metres):
+ *   - The long wall (B) is the line x = stairWidth, running along +y.
+ *   - The bottom end wall (A) is y = 0; the top end wall (C) is y = planB.
+ *   - The open side of the long run is x = 0, where the partition stands.
+ *   - Walking up: along +x on the bottom section, turn left onto +y along
+ *     the long wall, turn left again onto -x at the top, onto the landing.
+ *
+ * The outer (wall) edge is parametrised by a single running length `s`
+ * so that treads can wrap around the two wall corners.
+ * ------------------------------------------------------------------------- */
+
+const WALL = { BOTTOM: 0, LONG: 1, TOP: 2 };
+
+function computeLayout(p) {
+  const width = p.stairWidth;
+  const longWall = p.planB;
+  const riserHeight = p.floorToFloor / p.riserCount;
+  const straightTreads = p.riserCount - 1 - p.bottomWinders - p.topWinders;
+
+  const firstRiserX = width - p.planA;   // where the handrail (and first riser) starts on the bottom wall
+  const lastRiserX = width - p.planC;    // where the top riser meets the top wall
+  const bottomCorner = [0, width];       // inner corner the bottom winders fan around
+  const topCorner = [0, longWall - width];
+
+  const wallPosition = (point, wall) =>
+    wall === WALL.BOTTOM ? point[0]
+    : wall === WALL.LONG ? width + point[1]
+    : width + longWall + (width - point[0]);
+
+  /** Cast a ray from a corner to the wall; returns the wall point, which wall, and its running position. */
+  function rayToWall(origin, direction) {
+    let t = Infinity;
+    let wall = WALL.BOTTOM;
+    if (direction[0] > 0) { const hit = (width - origin[0]) / direction[0]; if (hit < t) { t = hit; wall = WALL.LONG; } }
+    if (direction[1] < 0) { const hit = (0 - origin[1]) / direction[1]; if (hit < t) { t = hit; wall = WALL.BOTTOM; } }
+    if (direction[1] > 0) { const hit = (longWall - origin[1]) / direction[1]; if (hit < t) { t = hit; wall = WALL.TOP; } }
+    const point = [origin[0] + direction[0] * t, origin[1] + direction[1] * t];
+    return { outer: point, wall, s: wallPosition(point, wall) };
+  }
+
+  // One "nosing line" per riser, from an inner point to the wall.
+  const nosings = [];
+
+  const startAngle = Math.atan2(-width, firstRiserX);
+  for (let i = 0; i <= p.bottomWinders; i++) {
+    const angle = startAngle * (1 - i / p.bottomWinders);
+    nosings.push({ inner: bottomCorner, ...rayToWall(bottomCorner, [Math.cos(angle), Math.sin(angle)]) });
+  }
+
+  const straightRun = longWall - 2 * width;
+  for (let j = 1; j <= straightTreads; j++) {
+    const y = width + (j * straightRun) / straightTreads;
+    nosings.push({ inner: [0, y], outer: [width, y], wall: WALL.LONG, s: width + y });
+  }
+
+  const endAngle = Math.atan2(width, lastRiserX);
+  for (let i = 1; i <= p.topWinders; i++) {
+    const angle = (endAngle * i) / p.topWinders;
+    nosings.push({ inner: topCorner, ...rayToWall(topCorner, [Math.cos(angle), Math.sin(angle)]) });
+  }
+
+  const wallCorners = [
+    { s: width, point: [width, 0], wall: WALL.BOTTOM },
+    { s: width + longWall, point: [width, longWall], wall: WALL.TOP },
+  ];
+
+  return { width, longWall, riserHeight, straightTreads, straightRun, firstRiserX, lastRiserX, nosings, wallCorners };
+}
+
+/** Polygon (plan) for the tread between two consecutive nosing lines, wrapping wall corners as needed. */
+function treadPolygon(layout, from, to) {
+  const polygon = [from.inner, from.outer];
+  for (const corner of layout.wallCorners) {
+    if (from.s < corner.s && corner.s < to.s) polygon.push(corner.point);
+  }
+  polygon.push(to.outer);
+  const sameInner = from.inner[0] === to.inner[0] && from.inner[1] === to.inner[1];
+  if (!sameInner) polygon.push(to.inner);
+  return polygon;
+}
+
+/** Handrail points ([x, y, z]) above the wall-side nosings, split per wall section for length reporting. */
+function handrailPath(layout, p) {
+  const { width, longWall, riserHeight, nosings, wallCorners } = layout;
+  const offset = HANDRAIL_WALL_OFFSET;
+  const points = [];
+  const sections = [[], [], []];
+
+  const pointAbove = (nosing, index) => {
+    const z = (index + 1) * riserHeight + p.handrailHeight;
+    const [x, y] = nosing.outer;
+    if (nosing.wall === WALL.BOTTOM) return [x, y + offset, z];
+    if (nosing.wall === WALL.LONG) return [x - offset, y, z];
+    return [x, y - offset, z];
+  };
+
+  nosings.forEach((nosing, index) => {
+    if (index > 0) {
+      const previous = nosings[index - 1];
+      wallCorners.forEach((corner, cornerIndex) => {
+        if (previous.s < corner.s && corner.s < nosing.s) {
+          const fraction = (corner.s - previous.s) / (nosing.s - previous.s);
+          const z = index * riserHeight + p.handrailHeight + fraction * riserHeight;
+          const cornerPoint = [width - offset, cornerIndex === 0 ? offset : longWall - offset, z];
+          points.push(cornerPoint);
+          sections[cornerIndex].push(cornerPoint);
+          sections[cornerIndex + 1].push(cornerPoint);
+        }
+      });
+    }
+    const point = pointAbove(nosing, index);
+    points.push(point);
+    sections[nosing.wall].push(point);
+  });
+
+  return { points, sections };
+}
+
+function polylineLength(points) {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    const [ax, ay, az] = points[i - 1];
+    const [bx, by, bz] = points[i];
+    total += Math.hypot(bx - ax, by - ay, bz - az);
+  }
+  return total;
+}
+
+/* ---------------------------------------------------------------------------
+ * Rendering (three.js)
+ * ------------------------------------------------------------------------- */
+
+const canvas = document.getElementById('viewport');
+const hint = document.getElementById('hint');
+
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+} catch (error) {
+  hint.textContent = 'WebGL is not available in this browser.';
+  hint.style.color = 'var(--warn)';
+  throw error;
+}
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 200);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x807060, 0.75));
+const sun = new THREE.DirectionalLight(0xfff2e0, 0.9);
+sun.position.set(6, 9, 4);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -6, right: 6, top: 8, bottom: -6, far: 30 });
+scene.add(sun);
+
+// Everything is modelled in plan coordinates (x, y) with z as height.
+// Rotating the root group makes z point up in three.js's y-up world.
+const root = new THREE.Group();
+root.rotation.x = -Math.PI / 2;
+scene.add(root);
+
+const materials = {
+  treadLight: new THREE.MeshStandardMaterial({ color: 0xc9a06a, roughness: 0.75 }),
+  treadDark:  new THREE.MeshStandardMaterial({ color: 0xa98050, roughness: 0.8 }),
+  wall:       new THREE.MeshStandardMaterial({ color: 0xf2eee7, roughness: 0.95, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }),
+  partition:  new THREE.MeshStandardMaterial({ color: 0xe0c99f, roughness: 0.85, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }),
+  floor:      new THREE.MeshStandardMaterial({ color: 0x9c9388, roughness: 1 }),
+  handrail:   new THREE.MeshStandardMaterial({ color: 0xd87a1e, roughness: 0.45, metalness: 0.05 }),
+  bracket:    new THREE.LineBasicMaterial({ color: 0x8a5a2a }),
+  guide:      new THREE.LineBasicMaterial({ color: 0x174a7a, transparent: true, opacity: 0.6 }),
+};
+
+let stairGroup = new THREE.Group();
+root.add(stairGroup);
+let fitTargets = [];   // meshes the camera should frame (steps and landing, not the floor)
+
+function shapeFromPolygon(polygon) {
+  const shape = new THREE.Shape();
+  polygon.forEach(([x, y], i) => (i === 0 ? shape.moveTo(x, y) : shape.lineTo(x, y)));
+  shape.closePath();
+  return shape;
+}
+
+function extrudedBlock(polygon, baseZ, height, material) {
+  const geometry = new THREE.ExtrudeGeometry(shapeFromPolygon(polygon), { depth: height, bevelEnabled: false });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.z = baseZ;
+  mesh.castShadow = mesh.receiveShadow = true;
+  return mesh;
+}
+
+function wallBox(x0, x1, y0, y1, z0, z1, material) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), material);
+  mesh.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+function lineBetween(points, material) {
+  const geometry = new THREE.BufferGeometry().setFromPoints(points.map((p) => new THREE.Vector3(...p)));
+  return new THREE.Line(geometry, material);
+}
+
+function disposeGroup(group) {
+  group.traverse((object) => object.geometry && object.geometry.dispose());
+}
+
+function buildScene() {
+  root.remove(stairGroup);
+  disposeGroup(stairGroup);
+  stairGroup = new THREE.Group();
+  root.add(stairGroup);
+  fitTargets = [];
+
+  const layout = computeLayout(params);
+  const { width, longWall, riserHeight, nosings } = layout;
+  const riserCount = params.riserCount;
+
+  // Steps: one solid block per riser, from the previous tread height up to its own.
+  for (let k = 0; k < riserCount - 1; k++) {
+    const polygon = treadPolygon(layout, nosings[k], nosings[k + 1]);
+    const step = extrudedBlock(polygon, k * riserHeight, riserHeight, k % 2 ? materials.treadLight : materials.treadDark);
+    stairGroup.add(step);
+    fitTargets.push(step);
+  }
+
+  // Landing at the top of the final riser.
+  const lastNosing = nosings[riserCount - 1];
+  const landingEdgeX = -LANDING_DEPTH;
+  const landing = extrudedBlock(
+    [lastNosing.inner, lastNosing.outer, [landingEdgeX, longWall], [landingEdgeX, longWall - width]],
+    params.floorToFloor - LANDING_THICKNESS, LANDING_THICKNESS, materials.treadLight,
+  );
+  stairGroup.add(landing);
+  fitTargets.push(landing);
+
+  // Walls, kept low and translucent so the stair stays visible.
+  const wallHeight = params.floorToFloor + 1.1;
+  stairGroup.add(wallBox(layout.firstRiserX - 0.9, width + WALL_THICKNESS, -WALL_THICKNESS, 0, 0, wallHeight, materials.wall));
+  stairGroup.add(wallBox(width, width + WALL_THICKNESS, -WALL_THICKNESS, longWall + WALL_THICKNESS, 0, wallHeight, materials.wall));
+  stairGroup.add(wallBox(layout.lastRiserX - 1.2, width + WALL_THICKNESS, longWall, longWall + WALL_THICKNESS, 0, wallHeight, materials.wall));
+  stairGroup.add(wallBox(-0.1, 0, width, longWall - width, 0, params.floorToFloor + 0.6, materials.partition));
+
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(5, longWall + 3), materials.floor);
+  floor.position.set(-0.6, longWall / 2, -0.001);
+  floor.receiveShadow = true;
+  stairGroup.add(floor);
+
+  // Handrail along the wall.
+  const rail = handrailPath(layout, params);
+  const curve = new THREE.CatmullRomCurve3(rail.points.map((p) => new THREE.Vector3(...p)), false, 'centripetal', 0.5);
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 160, HANDRAIL_RADIUS, 10, false), materials.handrail);
+  tube.castShadow = true;
+  stairGroup.add(tube);
+
+  // Brackets to the wall, every other nosing.
+  rail.sections.flat().filter((_, i) => i % 2 === 0).forEach((point) => {
+    const [x, y, z] = point;
+    const onWall =
+      Math.abs(y - HANDRAIL_WALL_OFFSET) < 1e-6 ? [x, 0, z - 0.05]
+      : Math.abs(y - (longWall - HANDRAIL_WALL_OFFSET)) < 1e-6 ? [x, longWall, z - 0.05]
+      : [width, y, z - 0.05];
+    stairGroup.add(lineBetween([point, onWall], materials.bracket));
+  });
+
+  // Floor guides for the three plan lengths.
+  stairGroup.add(lineBetween([[layout.firstRiserX, -0.05, 0.01], [width, -0.05, 0.01]], materials.guide));
+  stairGroup.add(lineBetween([[width + 0.05, 0, 0.01], [width + 0.05, longWall, 0.01]], materials.guide));
+  stairGroup.add(lineBetween([[layout.lastRiserX, longWall + 0.05, 0.01], [width, longWall + 0.05, 0.01]], materials.guide));
+
+  renderResults(layout, rail);
+  fitCameraToStair();
+}
+
+/* ---------------------------------------------------------------------------
+ * Results table
+ * ------------------------------------------------------------------------- */
+
+function renderResults(layout, rail) {
+  const modelLengths = rail.sections.map(polylineLength);
+  const modelTotal = modelLengths.reduce((sum, value) => sum + value, 0);
+  const measuredTotal = MEASURED_SLOPING.A + MEASURED_SLOPING.B + MEASURED_SLOPING.C;
+  const planTotal = params.planA + params.planB + params.planC;
+  const format = (value) => value.toFixed(3);
+  const status = (model, measured, tolerance) => (Math.abs(model - measured) < tolerance ? 'ok' : 'warn');
+
+  const rows = [
+    ['A (bottom end wall)', params.planA, modelLengths[0], MEASURED_SLOPING.A],
+    ['B (long wall)',       params.planB, modelLengths[1], MEASURED_SLOPING.B],
+    ['C (top end wall)',    params.planC, modelLengths[2], MEASURED_SLOPING.C],
+  ];
+
+  document.getElementById('results-body').innerHTML =
+    rows.map(([name, plan, model, measured]) =>
+      `<tr><td>${name}</td><td>${format(plan)}</td><td class="model ${status(model, measured, 0.08)}">${format(model)}</td><td>${format(measured)}</td></tr>`,
+    ).join('') +
+    `<tr><td>Total handrail</td><td>${format(planTotal)}</td><td class="model ${status(modelTotal, measuredTotal, 0.12)}">${format(modelTotal)}</td><td>${format(measuredTotal)}</td></tr>`;
+
+  const goingMm = ((layout.straightRun / layout.straightTreads) * 1000).toFixed(0);
+  document.getElementById('results-note').textContent =
+    `${params.riserCount} risers of ${(layout.riserHeight * 1000).toFixed(0)} mm, ${layout.straightTreads} straight treads with a ${goingMm} mm going. ` +
+    'The model follows a smooth rail above the wall-side nosings; a folding rule laid on the stringer reads slightly longer, so small differences are normal.';
+}
+
+/* ---------------------------------------------------------------------------
+ * Camera: orbit around the stair, auto-fit to the screen
+ * ------------------------------------------------------------------------- */
+
+const orbit = { target: new THREE.Vector3(), radius: 8, azimuth: -1.1, elevation: 1.1 };
+const ORBIT_LIMITS = { radiusMin: 2, radiusMax: 20, elevationMin: 0.15, elevationMax: 1.55 };
+
+function fitCameraToStair() {
+  const bounds = new THREE.Box3();
+  fitTargets.forEach((mesh) => { mesh.updateWorldMatrix(true, false); bounds.expandByObject(mesh); });
+  if (bounds.isEmpty()) return;
+
+  bounds.getCenter(orbit.target);
+  const boundingRadius = bounds.getSize(new THREE.Vector3()).length() / 2;
+  const verticalFov = THREE.MathUtils.degToRad(camera.fov);
+  const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect);
+  const limitingFov = Math.min(verticalFov, horizontalFov);
+  orbit.radius = Math.min(ORBIT_LIMITS.radiusMax, (boundingRadius / Math.sin(limitingFov / 2)) * 0.85);
+}
+
+function updateCamera() {
+  const { target, radius, azimuth, elevation } = orbit;
+  camera.position.set(
+    target.x + radius * Math.sin(elevation) * Math.sin(azimuth),
+    target.y + radius * Math.cos(elevation),
+    target.z + radius * Math.sin(elevation) * Math.cos(azimuth),
+  );
+  camera.lookAt(target);
+}
+
+function zoomBy(factor) {
+  orbit.radius = THREE.MathUtils.clamp(orbit.radius * factor, ORBIT_LIMITS.radiusMin, ORBIT_LIMITS.radiusMax);
+}
+
+// Pointer drag rotates; wheel and two-finger pinch zoom.
+let dragPointer = null;
+let pinchDistance = null;
+const touchDistance = (event) => Math.hypot(
+  event.touches[0].clientX - event.touches[1].clientX,
+  event.touches[0].clientY - event.touches[1].clientY,
+);
+
+canvas.addEventListener('pointerdown', (event) => {
+  event.preventDefault();
+  try { canvas.setPointerCapture(event.pointerId); } catch (_) { /* unsupported in some webviews */ }
+  dragPointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  hint.style.opacity = 0;
+});
+canvas.addEventListener('pointermove', (event) => {
+  if (!dragPointer || event.pointerId !== dragPointer.id || pinchDistance) return;
+  orbit.azimuth -= (event.clientX - dragPointer.x) * 0.006;
+  orbit.elevation = THREE.MathUtils.clamp(orbit.elevation - (event.clientY - dragPointer.y) * 0.006, ORBIT_LIMITS.elevationMin, ORBIT_LIMITS.elevationMax);
+  dragPointer.x = event.clientX;
+  dragPointer.y = event.clientY;
+});
+canvas.addEventListener('pointerup', () => { dragPointer = null; });
+canvas.addEventListener('pointercancel', () => { dragPointer = null; });
+canvas.addEventListener('wheel', (event) => { event.preventDefault(); zoomBy(1 + event.deltaY * 0.0012); }, { passive: false });
+canvas.addEventListener('touchstart', (event) => { if (event.touches.length === 2) pinchDistance = touchDistance(event); }, { passive: true });
+canvas.addEventListener('touchmove', (event) => {
+  if (event.touches.length !== 2 || !pinchDistance) return;
+  const distance = touchDistance(event);
+  zoomBy(pinchDistance / distance);
+  pinchDistance = distance;
+}, { passive: true });
+canvas.addEventListener('touchend', (event) => { if (event.touches.length < 2) pinchDistance = null; }, { passive: true });
+
+function resizeViewport() {
+  const viewport = window.visualViewport;
+  const width = viewport ? viewport.width : innerWidth;
+  const height = viewport ? viewport.height : innerHeight;
+  renderer.setSize(width, height, false);
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+  fitCameraToStair();
+}
+addEventListener('resize', resizeViewport);
+if (window.visualViewport) visualViewport.addEventListener('resize', resizeViewport);
+
+function applyTheme() {
+  const background = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
+  scene.background = background;
+  scene.fog = new THREE.Fog(background, 30, 60);
+}
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+
+/* ---------------------------------------------------------------------------
+ * Controls
+ * ------------------------------------------------------------------------- */
+
+const controls = document.getElementById('controls');
+const formatValue = (key) => (PARAMETERS[key].step >= 1 ? String(params[key]) : params[key].toFixed(3));
+
+function syncControl(key) {
+  document.getElementById(`input-${key}`).value = params[key];
+  document.getElementById(`output-${key}`).value = formatValue(key);
+}
+
+/** Keep a minimum number of straight treads when winder counts or riser count change. */
+function clampWinderCounts() {
+  const maxWinders = params.riserCount - 1 - MIN_STRAIGHT_TREADS;
+  if (params.bottomWinders + params.topWinders <= maxWinders) return;
+  params.topWinders = Math.max(PARAMETERS.topWinders.min, maxWinders - params.bottomWinders);
+  params.bottomWinders = Math.max(PARAMETERS.bottomWinders.min, maxWinders - params.topWinders);
+  syncControl('bottomWinders');
+  syncControl('topWinders');
+}
+
+for (const [key, def] of Object.entries(PARAMETERS)) {
+  const row = document.createElement('div');
+  row.className = 'control';
+  row.innerHTML =
+    `<label for="input-${key}">${def.label}</label>` +
+    `<output id="output-${key}" for="input-${key}"></output>` +
+    `<input type="range" id="input-${key}" min="${def.min}" max="${def.max}" step="${def.step}" value="${def.value}">`;
+  controls.appendChild(row);
+  row.querySelector('input').addEventListener('input', (event) => {
+    params[key] = parseFloat(event.target.value);
+    clampWinderCounts();
+    syncControl(key);
+    buildScene();
+  });
+  syncControl(key);
+}
+
+document.getElementById('reset-values').addEventListener('click', () => {
+  for (const key of Object.keys(PARAMETERS)) { params[key] = PARAMETERS[key].value; syncControl(key); }
+  buildScene();
+});
+document.getElementById('fit-view').addEventListener('click', fitCameraToStair);
+document.getElementById('view-above').addEventListener('click', () => { orbit.azimuth = 0; orbit.elevation = 0.18; fitCameraToStair(); });
+document.getElementById('view-hall').addEventListener('click', () => { orbit.azimuth = -1.1; orbit.elevation = 1.15; fitCameraToStair(); });
+
+const sheet = document.getElementById('sheet');
+const sheetToggle = document.getElementById('sheet-toggle');
+sheetToggle.addEventListener('click', () => {
+  const open = sheet.classList.toggle('open');
+  sheetToggle.setAttribute('aria-expanded', String(open));
+  document.getElementById('sheet-toggle-label').textContent = open ? 'Close' : 'Open';
+});
+
+/* ---------------------------------------------------------------------------
+ * Start
+ * ------------------------------------------------------------------------- */
+
+applyTheme();
+resizeViewport();
+buildScene();
+setTimeout(resizeViewport, 300); // some mobile webviews report the final viewport late
+
+(function animate() {
+  updateCamera();
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+})();
+</script>
+</body>
+</html>
